@@ -8,4 +8,4 @@ edition = "2021"
 bytes = "1.3.0"                                     # helps manage buffers
 nom = "7.1.3"
 thiserror = "1.0.32"                                # error handling
-tokio = { version = "1.23.0", features = ["full"] } # async networking
+tokio = { version = "1.24.2", features = ["full"] } # async networking
