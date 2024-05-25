@@ -10,6 +10,8 @@ use tracing::instrument;
 
 use crate::value::Value;
 
+type RespResult<'a> = IResult<&'a [u8], Value, nom::error::VerboseError<&'a [u8]>>;
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum OutOfRangeType {
     Array,
@@ -31,37 +33,41 @@ pub enum Error {
     Incomplete,
 }
 
-pub const RESP_MAX_SIZE: usize = 512 * 1024 * 1024;
+const RESP_MAX_SIZE: usize = 512 * 1024 * 1024;
 
 #[instrument]
 #[inline]
-fn parse_simple_string(
-    input: &[u8],
-) -> IResult<&[u8], Value, nom::error::VerboseError<&[u8]>> {
-    map_res(
-        delimited(char('+'), take_until("\r"), line_ending),
-        |val: &[u8]| Result::<Value, Error>::Ok(Value::SimpleString(val.into())),
-    )
+fn parse_simple<'a>(
+    indicator: char,
+    cb: fn(&'a [u8]) -> Result<Value, Error>,
+) -> impl FnMut(&'a [u8]) -> IResult<&'a [u8], Value, nom::error::VerboseError<&'a [u8]>> {
+    move |input| {
+        map_res(
+            delimited(char(indicator), take_until("\r"), line_ending),
+            cb,
+        )
+            .parse(input)
+    }
+}
+
+#[instrument]
+#[inline]
+fn parse_simple_string(input: &[u8]) -> RespResult {
+    parse_simple('+', |val| Ok(Value::SimpleString(val.into()))).parse(input)
+}
+
+#[instrument]
+#[inline]
+fn parse_simple_error(input: &[u8]) -> RespResult {
+    parse_simple('-', |val| {
+        Ok(Value::Error(std::str::from_utf8(val)?.into()))
+    })
         .parse(input)
 }
 
 #[instrument]
 #[inline]
-fn parse_simple_error(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError<&[u8]>> {
-    map_res(
-        context("simple_error_delimited", |input| {
-            delimited(char('-'), take_until("\r"), line_ending).parse(input)
-        }),
-        |val: &[u8]| {
-            Result::<Value, Error>::Ok(Value::Error(std::str::from_utf8(val)?.into()))
-        },
-    )
-        .parse(input)
-}
-
-#[instrument]
-#[inline]
-fn parse_bulk_string(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError<&[u8]>> {
+fn parse_bulk_string(input: &[u8]) -> RespResult {
     let (rest, result) = parse_length('$', OutOfRangeType::BulkString)(input)?;
 
     if result == -1i64 {
@@ -80,7 +86,7 @@ fn parse_bulk_string(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseE
 
 #[instrument]
 #[inline]
-fn parse_integer(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError<&[u8]>> {
+fn parse_integer(input: &[u8]) -> RespResult {
     map(delimited(char(':'), i64_parser, line_ending), |val: i64| {
         Value::Integer(val)
     })
@@ -88,6 +94,7 @@ fn parse_integer(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError
 }
 
 #[inline]
+#[instrument]
 fn parse_length<'a>(
     delimiter: char,
     out_of_range_type: OutOfRangeType,
@@ -108,7 +115,8 @@ fn parse_length<'a>(
 }
 
 #[inline]
-fn parse_any(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError<&[u8]>> {
+#[instrument]
+fn parse_any(input: &[u8]) -> RespResult {
     context(
         "parse_any",
         alt((
@@ -124,7 +132,7 @@ fn parse_any(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError<&[u
 
 #[instrument]
 #[inline]
-fn parse_array(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError<&[u8]>> {
+fn parse_array(input: &[u8]) -> RespResult {
     let (rest, result) = parse_length('*', OutOfRangeType::Array)(input)?;
 
     if result == -1i64 {
@@ -146,19 +154,19 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], Value, nom::error::VerboseError<&
 }
 
 #[inline]
+#[instrument]
 pub(super) fn parse(input: &[u8]) -> Result<Value, Error> {
     match all_consuming(parse_any).parse(input) {
         Ok((&[], redis_type)) => Ok(redis_type),
-        Ok((rest, _)) => Err(Error::Parse(
-            nom::error::VerboseError::from_error_kind(
-                std::str::from_utf8(rest)?.to_string(),
-                nom::error::ErrorKind::Fail,
-            ),
-        )),
+        Ok((rest, _)) => Err(Error::Parse(nom::error::VerboseError::from_error_kind(
+            std::str::from_utf8(rest)?.to_string(),
+            nom::error::ErrorKind::Fail,
+        ))),
         Err(NomParseError::Incomplete(_)) => Err(Error::Incomplete),
-        Err(err) => Err(Error::Parse(
-            nom::error::VerboseError::from_error_kind(err.to_string(), nom::error::ErrorKind::Fail),
-        )),
+        Err(err) => Err(Error::Parse(nom::error::VerboseError::from_error_kind(
+            err.to_string(),
+            nom::error::ErrorKind::Fail,
+        ))),
     }
 }
 
@@ -219,10 +227,7 @@ mod tests {
 
         let input = b"*1\r\n:523\r\n";
         let result = parse(input);
-        assert_eq!(
-            result,
-            Ok(Value::Array(vec![Value::Integer(523)].into()))
-        );
+        assert_eq!(result, Ok(Value::Array(vec![Value::Integer(523)].into())));
 
         let input = b"*4\r\n$4\r\nECHO\r\n$5\r\nHello\r\n$5\r\nWorld\r\n+Hello\r\n";
         let result = parse(input);

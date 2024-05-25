@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use tokio::io;
 use tokio::net::TcpListener;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
 use tracing::{error, info, instrument};
 
 use super::handler::Handler;
@@ -15,8 +15,8 @@ pub enum Error {
     #[error("Failed to accept client: {0}")]
     AcceptClient(io::Error),
 
-    #[error(transparent)]
-    Any(Box<dyn std::error::Error>),
+    #[error("Failed to acquire token to accept new client: {0}")]
+    ClientsAcquireToken(#[from] AcquireError),
 }
 
 #[derive(Debug)]
@@ -66,8 +66,7 @@ impl Server {
         loop {
             let token = Arc::clone(&self.connection_limit)
                 .acquire_owned()
-                .await
-                .map_err(|err| Error::Any(err.into()))?;
+                .await?;
 
             match self.accept_client(token).await {
                 Ok(_) => info!("New Client accepted"),
