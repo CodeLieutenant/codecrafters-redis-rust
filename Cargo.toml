@@ -7,10 +7,9 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1.37.0", features = ["full"] }
 tracing = { version = "0.1.40", features = ["async-await", "attributes"] }
+tracing-appender = { version = "0.2.3", features = ["parking_lot"] }
 tracing-subscriber = { version = "0.3.18", features = [
     "parking_lot",
-    "serde",
-    "serde_json",
     "time",
     "tracing",
     "once_cell",
