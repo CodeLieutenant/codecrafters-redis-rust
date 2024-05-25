@@ -1,17 +1,11 @@
-use std::ops::DerefMut;
 use std::sync::Arc;
 
-use bytes::BytesMut;
-use sharded_slab::Clear;
 use tokio::io;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::io::BufWriter;
 use tokio::net::TcpListener;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tracing::{error, info, instrument};
 
-use crate::handler::Handler;
-use crate::parser;
+use super::handler::Handler;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -26,28 +20,13 @@ pub enum Error {
 }
 
 #[derive(Debug)]
-struct BytesMutWrapper(BytesMut);
-
-impl Clear for BytesMutWrapper {
-    fn clear(&mut self) {
-        self.0.clear();
-    }
-}
-
-impl Default for BytesMutWrapper {
-    fn default() -> Self {
-        Self(BytesMut::with_capacity(64 * 1024))
-    }
-}
-
-#[derive(Debug)]
-pub struct RedisServer {
+pub(crate) struct Server {
     listener: TcpListener,
     connection_limit: Arc<Semaphore>,
-    pool: Arc<sharded_slab::Pool<BytesMutWrapper>>,
+    pool: Arc<sharded_slab::Pool<super::bytes::Buffer>>,
 }
 
-impl RedisServer {
+impl Server {
     #[instrument]
     #[inline]
     pub async fn new(port: u16, connection_limit: usize) -> Result<Self, Error> {
@@ -69,7 +48,7 @@ impl RedisServer {
         let pool = Arc::clone(&self.pool);
         tokio::spawn(async move {
             let mut item = pool.create_owned().unwrap();
-            let mut handler = Handler::new(client, &mut item.0);
+            let mut handler = Handler::new(client, &mut item);
 
             handler.run().await.unwrap();
 
@@ -81,7 +60,7 @@ impl RedisServer {
     }
 
     #[instrument]
-    pub async fn run(&self) -> Result<(), Error> {
+    pub async fn start(&self) -> Result<(), Error> {
         info!("Starting Accept connection loop");
 
         loop {

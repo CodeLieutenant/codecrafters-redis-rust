@@ -2,8 +2,6 @@ use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
 
-use crate::parser;
-
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Failed to read from connection: {0}")]
@@ -29,7 +27,9 @@ impl<'a> Handler<'a> {
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         loop {
             self.stream.read_buf(self.buf).await.map_err(Error::Read)?;
-            let _command = parser::parse(self.buf)?;
+
+            let _ast = crate::parser::Parser::parse(&self.buf)?;
+
             self.stream
                 .write_all(b"+PONG\r\n")
                 .await

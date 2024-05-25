@@ -1,24 +1,21 @@
 use std::process::exit;
 
-mod command;
-mod parser;
-mod server;
-mod handler;
+use redis::start_server;
 
 #[tokio::main]
 async fn main() {
-    let server = server::RedisServer::new(6379, 1024).await;
+    let server = start_server(6379, 1024).await;
 
     match server {
         Ok(server) => {
             tokio::select! {
-                result = tokio::signal::ctrl_c() => {
-                    if let Err(err) = result {
+                _ = tokio::signal::ctrl_c() => {
+                    println!("Receiving CTRL+C... Exiting...");
+                },
+                result = server.run() => {
+                     if let Err(err) = result {
                         eprintln!("{:?}", err);
                     }
-                },
-                _ = server.run() => {
-                    println!("Receiving CTRL+C... Exiting...");
                 }
             }
         }

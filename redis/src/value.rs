@@ -1,22 +1,17 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum RedisCommand {
-    Ping,
-    Echo(Box<str>),
-}
-
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RedisValue {
+pub enum Value {
     Null,
     NullArray,
     SimpleString(Box<[u8]>),
     Error(Box<str>),
     Integer(i64),
     BulkString(Box<[u8]>),
-    Array(Box<[RedisValue]>),
+    Array(Box<[Value]>),
 }
 
-
-impl RedisValue {
+impl Value {
     pub fn serialize(&self) {}
 }
+
+#[cfg(test)]
+mod tests {}

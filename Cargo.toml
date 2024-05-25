@@ -5,12 +5,7 @@ authors = ["Codecrafters <hello@codecrafters.io>", "Dusan Malusev <dusan@dusanma
 edition = "2021"
 
 [dependencies]
-bytes = "1.6.0"
-nom = "7.1.3"
-serde = { version = "1.0.202", features = ["rc", "derive", "serde_derive"] }
-thiserror = "1.0.61"
 tokio = { version = "1.37.0", features = ["full"] }
-sharded-slab = "0.1.7"
 tracing = { version = "0.1.40", features = ["async-await", "attributes"] }
 tracing-subscriber = { version = "0.3.18", features = [
     "parking_lot",
@@ -21,3 +16,8 @@ tracing-subscriber = { version = "0.3.18", features = [
     "once_cell",
     "env-filter",
 ] }
+
+redis = { path = "redis" }
+
+[workspace]
+members = ["redis"]
