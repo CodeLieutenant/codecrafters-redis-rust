@@ -8,13 +8,19 @@ use nom::multi::fold_many_m_n;
 use nom::sequence::{delimited, terminated};
 use tracing::instrument;
 
-use crate::command::RedisValue;
+use crate::command::{RedisCommand, RedisValue};
 
 pub const RESP_MAX_SIZE: usize = 512 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct Parser {
     ast: RedisValue,
+}
+
+impl Parser {
+    pub fn command(&self) -> Result<RedisCommand, ParserError> {
+        Ok(RedisCommand::Echo("".into()))
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -39,6 +45,7 @@ pub enum ParserError {
 }
 
 #[instrument]
+#[inline]
 fn parse_simple_string(
     input: &[u8],
 ) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
@@ -50,6 +57,7 @@ fn parse_simple_string(
 }
 
 #[instrument]
+#[inline]
 fn parse_simple_error(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
     map_res(
         context("simple_error_delimited", |input| {
@@ -65,6 +73,7 @@ fn parse_simple_error(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::Ve
 }
 
 #[instrument]
+#[inline]
 fn parse_bulk_string(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
     let (rest, result) = parse_length('$', OutOfRangeType::BulkString)(input)?;
 
@@ -83,6 +92,7 @@ fn parse_bulk_string(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::Ver
 }
 
 #[instrument]
+#[inline]
 fn parse_integer(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
     map(delimited(char(':'), i64_parser, line_ending), |val: i64| {
         RedisValue::Integer(val)
@@ -90,6 +100,7 @@ fn parse_integer(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::Verbose
         .parse(input)
 }
 
+#[inline]
 fn parse_length<'a>(
     delimiter: char,
     out_of_range_type: OutOfRangeType,
@@ -109,6 +120,7 @@ fn parse_length<'a>(
     }
 }
 
+#[inline]
 fn parse_any(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
     context(
         "parse_any",
@@ -124,6 +136,7 @@ fn parse_any(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseErro
 }
 
 #[instrument]
+#[inline]
 fn parse_array(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
     let (rest, result) = parse_length('*', OutOfRangeType::Array)(input)?;
 
@@ -145,9 +158,10 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseEr
     Ok((rest, RedisValue::Array(value.into())))
 }
 
-pub fn parse(input: &[u8]) -> Result<RedisValue, ParserError> {
+#[inline]
+pub fn parse(input: &[u8]) -> Result<Parser, ParserError> {
     match all_consuming(parse_any).parse(input) {
-        Ok((&[], redis_type)) => Ok(redis_type),
+        Ok((&[], redis_type)) => Ok(Parser { ast: redis_type }),
         Ok((rest, _)) => Err(ParserError::ParseError(
             nom::error::VerboseError::from_error_kind(
                 std::str::from_utf8(rest)?.to_string(),

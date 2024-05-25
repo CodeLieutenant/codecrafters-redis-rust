@@ -4,6 +4,7 @@ pub enum RedisCommand {
     Echo(Box<str>),
 }
 
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum RedisValue {
     Null,
@@ -13,4 +14,9 @@ pub enum RedisValue {
     Integer(i64),
     BulkString(Box<[u8]>),
     Array(Box<[RedisValue]>),
+}
+
+
+impl RedisValue {
+    pub fn serialize(&self) {}
 }

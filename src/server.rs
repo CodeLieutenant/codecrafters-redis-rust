@@ -49,6 +49,7 @@ pub struct RedisServer {
 
 impl RedisServer {
     #[instrument]
+    #[inline]
     pub async fn new(port: u16, connection_limit: usize) -> Result<Self, Error> {
         let listener = TcpListener::bind(("0.0.0.0", port))
             .await
