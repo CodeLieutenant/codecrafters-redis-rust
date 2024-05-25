@@ -1,36 +1,31 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use std::process::exit;
 
 mod command;
 mod parser;
+mod server;
+mod handler;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let listener = TcpListener::bind("0.0.0.0:6379").await?;
+async fn main() {
+    let server = server::RedisServer::new(6379, 1024).await;
 
-    loop {
-        let (client, _socket) = listener.accept().await?;
-
-        tokio::spawn(async move {
-            match handle_client(client).await {
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Error: {:?}", e);
+    match server {
+        Ok(server) => {
+            tokio::select! {
+                result = tokio::signal::ctrl_c() => {
+                    if let Err(err) = result {
+                        eprintln!("{:?}", err);
+                    }
+                },
+                _ = server.run() => {
+                    println!("Receiving CTRL+C... Exiting...");
                 }
             }
-        });
-    }
-}
+        }
 
-async fn handle_client(mut client: TcpStream) -> Result<(), Box<dyn std::error::Error>> {
-    let mut buf = vec![0u8; 65536];
-
-    loop {
-        let nread = client.read(&mut buf).await?;
-
-        let input = std::str::from_utf8(&buf[..nread]).unwrap();
-        let _command = parser::parse(input)?;
-
-        client.write_all(b"+PONG\r\n").await?;
+        Err(err) => {
+            eprintln!("{:?}", err);
+            exit(1);
+        }
     }
 }
