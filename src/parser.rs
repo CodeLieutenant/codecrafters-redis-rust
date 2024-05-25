@@ -76,10 +76,10 @@ fn parse_bulk_string(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::Ver
         return map(line_ending, |_| RedisValue::BulkString(Default::default())).parse(rest);
     }
 
-    map(
-        terminated(take_until("\r"), line_ending),
-        |val: &[u8]| RedisValue::BulkString(val.into()),
-    ).parse(rest)
+    map(terminated(take_until("\r"), line_ending), |val: &[u8]| {
+        RedisValue::BulkString(val.into())
+    })
+        .parse(rest)
 }
 
 #[instrument]
@@ -132,7 +132,7 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseEr
     }
 
     let (rest, value) = fold_many_m_n(
-        0,
+        result as usize,
         result as usize,
         parse_any,
         move || Vec::with_capacity(result as usize),
