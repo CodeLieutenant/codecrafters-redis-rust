@@ -1,12 +1,12 @@
+use crate::value::Value;
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::net::TcpStream;
-use crate::value::Value;
+use tracing::instrument;
 
-use crate::{bulk_string_rc, Command, simple_string};
 use crate::parser::Error as ParserError;
 use crate::resp::Error as RespError;
-
+use crate::{bulk_string_rc, simple_string, Command};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -17,9 +17,10 @@ pub enum Error {
     Write(std::io::Error),
 
     #[error("Parser error: {0}")]
-    Parse(#[from] crate::parser::Error)
+    Parse(#[from] crate::parser::Error),
 }
 
+#[derive(Debug)]
 pub struct Handler<'a> {
     stream: BufWriter<TcpStream>,
     reader: &'a mut BytesMut,
@@ -27,6 +28,7 @@ pub struct Handler<'a> {
 }
 
 impl<'a> Handler<'a> {
+    #[instrument]
     pub fn new(stream: TcpStream, reader: &'a mut BytesMut, output: &'a mut Vec<u8>) -> Self {
         Self {
             stream: BufWriter::new(stream),
@@ -35,6 +37,7 @@ impl<'a> Handler<'a> {
         }
     }
 
+    #[instrument]
     async fn handle_command(&mut self, command: Command) -> Result<(), Error> {
         self.output.clear();
 
@@ -45,6 +48,10 @@ impl<'a> Handler<'a> {
             Command::Echo(val) => {
                 bulk_string_rc!(&val).serialize(self.output);
             }
+            // Ignore Command
+            Command::Command => {
+                return Ok(());
+            }
         }
 
         self.stream
@@ -52,12 +59,18 @@ impl<'a> Handler<'a> {
             .await
             .map_err(Error::Write)?;
 
+        self.stream.flush().await.map_err(Error::Write)?;
+
         Ok(())
     }
 
+    #[instrument]
     pub async fn run(&mut self) -> Result<(), Error> {
         loop {
-            self.stream.read_buf(self.reader).await.map_err(Error::Read)?;
+            self.stream
+                .read_buf(self.reader)
+                .await
+                .map_err(Error::Read)?;
             let parser = crate::parser::Parser::parse(&self.reader);
 
             match parser {

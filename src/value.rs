@@ -1,8 +1,11 @@
+use nom::AsBytes;
+use serde::Serializer;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 
 use tracing::instrument;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum Value {
     Null,
     NullArray,
@@ -11,6 +14,41 @@ pub enum Value {
     Integer(i64),
     BulkString(Rc<[u8]>),
     Array(Box<[Value]>),
+}
+
+impl Debug for Value {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Null => f.write_str("NULL"),
+            Value::NullArray => f.write_str("NULL ARRAY"),
+            Value::SimpleString(data) => {
+                f.write_str("SIMPLE STRING(")?;
+                f.write_str(std::str::from_utf8(data.as_bytes()).unwrap())?;
+                f.write_str(")")
+            }
+            Value::Error(err) => f.write_str(std::str::from_utf8(err.as_bytes()).unwrap()),
+            Value::Integer(val) => {
+                f.write_str("INTEGER(")?;
+                f.serialize_i64(*val)?;
+                f.write_str(")")
+            }
+            Value::BulkString(data) => {
+                f.write_str("BULK STRING(")?;
+                f.write_str(std::str::from_utf8(data.as_bytes()).unwrap())?;
+                f.write_str(")")
+            }
+            Value::Array(array) => {
+                f.write_str("ARRAY[")?;
+
+                for item in array.iter() {
+                    item.fmt(f)?;
+                    f.write_str(", ")?;
+                }
+
+                f.write_str("]")
+            }
+        }
+    }
 }
 
 impl Value {
@@ -71,7 +109,10 @@ impl Value {
                 output.extend_from_slice(fmt.as_bytes());
                 output.extend_from_slice(b"\r\n");
 
-                array.into_vec().drain(..).for_each(|value| value.serialize(output));
+                array
+                    .into_vec()
+                    .drain(..)
+                    .for_each(|value| value.serialize(output));
             }
         }
     }
@@ -79,8 +120,8 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::{array, crate::error, bulk_string, integer, null, null_array, simple_string};
     use super::*;
+    use crate::{crate::error, array, bulk_string, integer, null, null_array, simple_string};
 
     #[test]
     fn test_serialize() {

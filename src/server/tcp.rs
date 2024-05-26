@@ -60,7 +60,10 @@ impl Server {
             let mut output = output_pool.create_owned().ok_or(Error::AcquirePool)?;
             let mut handler = Handler::new(client, &mut item, &mut output);
 
-            handler.run().await?;
+            match handler.run().await {
+                Ok(_) => info!("Closing client"),
+                Err(err) => error!(err = ?err, "Failed to handle client"),
+            }
 
             drop(handler);
             drop(token);
@@ -75,9 +78,7 @@ impl Server {
         info!("Starting Accept connection loop");
 
         loop {
-            let token = Arc::clone(&self.connection_limit)
-                .acquire_owned()
-                .await?;
+            let token = Arc::clone(&self.connection_limit).acquire_owned().await?;
 
             match self.accept_client(token).await {
                 Ok(_) => info!("New Client accepted"),

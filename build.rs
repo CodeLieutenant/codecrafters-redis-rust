@@ -14,6 +14,7 @@ fn main() {
         pub enum CommandKeywords {
             Ping,
             Echo,
+            Command,
         }"#;
 
     writeln!(&mut file, "{}", enum_str).expect("Failed to write CommandKeywords to file");
@@ -24,8 +25,9 @@ fn main() {
         phf_codegen::Map::<&uncased::UncasedStr>::new()
             .entry("ping".into(), "CommandKeywords::Ping")
             .entry("echo".into(), "CommandKeywords::Echo")
+            .entry("command".into(), "CommandKeywords::Command")
             .build()
     )
-        .expect("Failed to write COMMAND_KEYWORDS to file");
+    .expect("Failed to write COMMAND_KEYWORDS to file");
     writeln!(&mut file, ";").unwrap();
 }

@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
-use tracing::error;
+use tracing::{error, info, instrument};
 
-use crate::{Command, COMMAND_KEYWORDS, CommandKeywords, value::Value};
+use crate::{value::Value, Command, CommandKeywords, COMMAND_KEYWORDS};
 
 use crate::resp::parse as parse_input;
 
@@ -14,7 +14,6 @@ pub struct Parser {
 unsafe impl Send for Parser {}
 
 unsafe impl Sync for Parser {}
-
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -32,7 +31,6 @@ pub enum Error {
 
     #[error("Invalid UTF8 Input: {0}")]
     Utf8(#[from] std::str::Utf8Error),
-
 }
 
 impl Parser {
@@ -42,6 +40,7 @@ impl Parser {
         })
     }
 
+    #[instrument]
     fn extract_params(values: Box<[Value]>) -> Result<Command, Error> {
         let command: &[u8] = match &values[0] {
             Value::SimpleString(command) | Value::BulkString(command) => command,
@@ -50,11 +49,13 @@ impl Parser {
             }
         };
 
-        let command = uncased::UncasedStr::new(std::str::from_utf8(command)?);
+        let command = std::str::from_utf8(command)?;
+        let command = uncased::UncasedStr::new(command);
         let command = COMMAND_KEYWORDS.get(command).ok_or(Error::NotExists)?;
 
         match command {
             CommandKeywords::Ping => Ok(Command::Ping),
+            CommandKeywords::Command => Ok(Command::Ping),
             CommandKeywords::Echo => {
                 let values = &values[1..];
 
@@ -65,7 +66,7 @@ impl Parser {
                     ));
                 }
 
-                let arg = match &values[1] {
+                let arg = match &values[0] {
                     Value::SimpleString(command) | Value::BulkString(command) => Rc::clone(command),
                     val => {
                         error!(
@@ -85,6 +86,7 @@ impl Parser {
         }
     }
 
+    #[instrument]
     pub fn command(self) -> Result<Command, Error> {
         match self.ast {
             Value::SimpleString(val) => {
@@ -113,7 +115,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::{array, bulk_string, Command, simple_string};
+    use crate::{array, bulk_string, simple_string, Command};
 
     use super::*;
 
@@ -127,7 +129,6 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Command::Ping);
-
 
         let parser = Parser {
             ast: array![simple_string!(b"PING")],

@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use nom::{Err as NomParseError, IResult, Parser as NomParser};
 use nom::branch::alt;
 use nom::bytes::streaming::take_until;
 use nom::character::streaming::{char, i64 as i64_parser, line_ending};
@@ -8,6 +7,7 @@ use nom::combinator::{all_consuming, map, map_res};
 use nom::error::{context, ParseError};
 use nom::multi::fold_many_m_n;
 use nom::sequence::{delimited, terminated};
+use nom::{Err as NomParseError, IResult, Parser as NomParser};
 use tracing::instrument;
 
 use crate::value::Value;
@@ -48,7 +48,7 @@ fn parse_simple<'a>(
             delimited(char(indicator), take_until("\r"), line_ending),
             cb,
         )
-            .parse(input)
+        .parse(input)
     }
 }
 
@@ -64,7 +64,7 @@ fn parse_simple_error(input: &[u8]) -> RespResult {
     parse_simple('-', |val| {
         Ok(Value::Error(std::str::from_utf8(val)?.into()))
     })
-        .parse(input)
+    .parse(input)
 }
 
 #[instrument]
@@ -82,13 +82,13 @@ fn parse_bulk_string(input: &[u8]) -> RespResult {
             let rc: Rc<[u8]> = Rc::from(rc);
             Value::BulkString(rc)
         })
-            .parse(rest);
+        .parse(rest);
     }
 
     map(terminated(take_until("\r"), line_ending), |val: &[u8]| {
         Value::BulkString(val.into())
     })
-        .parse(rest)
+    .parse(rest)
 }
 
 #[instrument]
@@ -97,7 +97,7 @@ fn parse_integer(input: &[u8]) -> RespResult {
     map(delimited(char(':'), i64_parser, line_ending), |val: i64| {
         Value::Integer(val)
     })
-        .parse(input)
+    .parse(input)
 }
 
 #[inline]
@@ -117,7 +117,7 @@ fn parse_length<'a>(
                 val => Err(Error::OutOfRange(out_of_range_type, val)),
             },
         )
-            .parse(input)
+        .parse(input)
     }
 }
 
@@ -134,7 +134,7 @@ fn parse_any(input: &[u8]) -> RespResult {
             context("integer", parse_integer),
         )),
     )
-        .parse(input)
+    .parse(input)
 }
 
 #[instrument]
@@ -247,7 +247,7 @@ mod tests {
                     Value::BulkString(b"World".to_vec().into()),
                     Value::SimpleString(b"Hello".to_vec().into()),
                 ]
-                    .into()
+                .into()
             ))
         );
     }

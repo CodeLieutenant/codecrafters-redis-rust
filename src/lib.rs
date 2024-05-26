@@ -7,15 +7,16 @@ use crate::server::tcp::{Error, Server as InnerRedisServer};
 include!(concat!(env!("OUT_DIR"), "/commands.rs"));
 
 pub mod error;
+mod macros;
+pub(crate) mod parser;
 mod resp;
 pub(crate) mod server;
 pub mod value;
-pub(crate) mod parser;
-mod macros;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Ping,
+    Command,
     Echo(Rc<[u8]>),
 }
 
@@ -27,13 +28,13 @@ unsafe impl Send for Command {}
 unsafe impl Sync for Command {}
 
 pub trait Server {
-    fn run(&self) -> Pin<Box<dyn Future<Output=Result<(), Error>> + '_>>;
+    fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + '_>>;
 }
 
 struct RedisServer(InnerRedisServer);
 
 impl Server for RedisServer {
-    fn run(&self) -> Pin<Box<dyn Future<Output=Result<(), Error>> + '_>> {
+    fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + '_>> {
         Box::pin(self.0.start())
     }
 }

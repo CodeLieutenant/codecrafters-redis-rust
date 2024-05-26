@@ -7,5 +7,5 @@ pub enum Error {
     Client(#[from] crate::server::handler::Error),
 
     #[error("Parser error: {0}")]
-    Parse(#[from] crate::parser::Error)
+    Parse(#[from] crate::parser::Error),
 }
