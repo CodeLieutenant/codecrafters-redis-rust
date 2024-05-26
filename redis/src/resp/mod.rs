@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use nom::{Err as NomParseError, IResult, Parser as NomParser};
 use nom::branch::alt;
 use nom::bytes::streaming::take_until;
@@ -8,20 +10,9 @@ use nom::multi::fold_many_m_n;
 use nom::sequence::{delimited, terminated};
 use tracing::instrument;
 
-use crate::command::{RedisCommand, RedisValue};
+use crate::value::Value;
 
-pub const RESP_MAX_SIZE: usize = 512 * 1024 * 1024;
-
-#[derive(Clone, Debug)]
-pub struct Parser {
-    ast: RedisValue,
-}
-
-impl Parser {
-    pub fn command(&self) -> Result<RedisCommand, ParserError> {
-        Ok(RedisCommand::Echo("".into()))
-    }
-}
+type RespResult<'a> = IResult<&'a [u8], Value, nom::error::VerboseError<&'a [u8]>>;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum OutOfRangeType {
@@ -30,77 +21,87 @@ pub enum OutOfRangeType {
 }
 
 #[derive(Debug, thiserror::Error, PartialEq)]
-pub enum ParserError {
+pub enum Error {
     #[error("Number out of range {0:?}: {1} (valid values: -1, >= 0 < 512MiB)")]
     OutOfRange(OutOfRangeType, i64),
 
     #[error("Failed to parse input: {0}")]
-    ParseError(#[from] nom::error::VerboseError<String>),
+    Parse(#[from] nom::error::VerboseError<String>),
 
     #[error("String must be UTF8: {0}")]
-    Utf8Error(#[from] std::str::Utf8Error),
+    Utf8(#[from] std::str::Utf8Error),
 
     #[error("needs more input")]
     Incomplete,
 }
 
+const RESP_MAX_SIZE: usize = 512 * 1024 * 1024;
+
 #[instrument]
 #[inline]
-fn parse_simple_string(
-    input: &[u8],
-) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
-    map_res(
-        delimited(char('+'), take_until("\r"), line_ending),
-        |val: &[u8]| Result::<RedisValue, ParserError>::Ok(RedisValue::SimpleString(val.into())),
-    )
+fn parse_simple<'a>(
+    indicator: char,
+    cb: fn(&'a [u8]) -> Result<Value, Error>,
+) -> impl FnMut(&'a [u8]) -> IResult<&'a [u8], Value, nom::error::VerboseError<&'a [u8]>> {
+    move |input| {
+        map_res(
+            delimited(char(indicator), take_until("\r"), line_ending),
+            cb,
+        )
+            .parse(input)
+    }
+}
+
+#[instrument]
+#[inline]
+fn parse_simple_string(input: &[u8]) -> RespResult {
+    parse_simple('+', |val| Ok(Value::SimpleString(val.into()))).parse(input)
+}
+
+#[instrument]
+#[inline]
+fn parse_simple_error(input: &[u8]) -> RespResult {
+    parse_simple('-', |val| {
+        Ok(Value::Error(std::str::from_utf8(val)?.into()))
+    })
         .parse(input)
 }
 
 #[instrument]
 #[inline]
-fn parse_simple_error(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
-    map_res(
-        context("simple_error_delimited", |input| {
-            delimited(char('-'), take_until("\r"), line_ending).parse(input)
-        }),
-        |val: &[u8]| {
-            Result::<RedisValue, ParserError>::Ok(RedisValue::Error(
-                std::str::from_utf8(val)?.into(),
-            ))
-        },
-    )
-        .parse(input)
-}
-
-#[instrument]
-#[inline]
-fn parse_bulk_string(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
+fn parse_bulk_string(input: &[u8]) -> RespResult {
     let (rest, result) = parse_length('$', OutOfRangeType::BulkString)(input)?;
 
     if result == -1i64 {
-        return Ok((rest, RedisValue::Null));
+        return Ok((rest, Value::Null));
     }
 
     if result == 0i64 {
-        return map(line_ending, |_| RedisValue::BulkString(Default::default())).parse(rest);
+        return map(line_ending, |_| {
+            let rc: &[u8] = b"";
+            let rc: Rc<[u8]> = Rc::from(rc);
+            Value::BulkString(rc)
+        })
+            .parse(rest);
     }
 
     map(terminated(take_until("\r"), line_ending), |val: &[u8]| {
-        RedisValue::BulkString(val.into())
+        Value::BulkString(val.into())
     })
         .parse(rest)
 }
 
 #[instrument]
 #[inline]
-fn parse_integer(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
+fn parse_integer(input: &[u8]) -> RespResult {
     map(delimited(char(':'), i64_parser, line_ending), |val: i64| {
-        RedisValue::Integer(val)
+        Value::Integer(val)
     })
         .parse(input)
 }
 
 #[inline]
+#[instrument]
 fn parse_length<'a>(
     delimiter: char,
     out_of_range_type: OutOfRangeType,
@@ -113,7 +114,7 @@ fn parse_length<'a>(
             ),
             |len| match len {
                 len if len >= -1 && len < RESP_MAX_SIZE as i64 => Ok(len),
-                val => Err(ParserError::OutOfRange(out_of_range_type, val)),
+                val => Err(Error::OutOfRange(out_of_range_type, val)),
             },
         )
             .parse(input)
@@ -121,7 +122,8 @@ fn parse_length<'a>(
 }
 
 #[inline]
-fn parse_any(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
+#[instrument]
+fn parse_any(input: &[u8]) -> RespResult {
     context(
         "parse_any",
         alt((
@@ -137,11 +139,11 @@ fn parse_any(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseErro
 
 #[instrument]
 #[inline]
-fn parse_array(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseError<&[u8]>> {
+fn parse_array(input: &[u8]) -> RespResult {
     let (rest, result) = parse_length('*', OutOfRangeType::Array)(input)?;
 
     if result == -1i64 {
-        return Ok((rest, RedisValue::NullArray));
+        return Ok((rest, Value::NullArray));
     }
 
     let (rest, value) = fold_many_m_n(
@@ -155,26 +157,23 @@ fn parse_array(input: &[u8]) -> IResult<&[u8], RedisValue, nom::error::VerboseEr
         },
     )(rest)?;
 
-    Ok((rest, RedisValue::Array(value.into())))
+    Ok((rest, Value::Array(value.into())))
 }
 
 #[inline]
-pub fn parse(input: &[u8]) -> Result<Parser, ParserError> {
+#[instrument]
+pub(super) fn parse(input: &[u8]) -> Result<Value, Error> {
     match all_consuming(parse_any).parse(input) {
-        Ok((&[], redis_type)) => Ok(Parser { ast: redis_type }),
-        Ok((rest, _)) => Err(ParserError::ParseError(
-            nom::error::VerboseError::from_error_kind(
-                std::str::from_utf8(rest)?.to_string(),
-                nom::error::ErrorKind::Fail,
-            ),
-        )),
-        Err(NomParseError::Incomplete(size)) => {
-            println!("{size:?}");
-            Err(ParserError::Incomplete)
-        }
-        Err(err) => Err(ParserError::ParseError(
-            nom::error::VerboseError::from_error_kind(err.to_string(), nom::error::ErrorKind::Fail),
-        )),
+        Ok((&[], redis_type)) => Ok(redis_type),
+        Ok((rest, _)) => Err(Error::Parse(nom::error::VerboseError::from_error_kind(
+            std::str::from_utf8(rest)?.to_string(),
+            nom::error::ErrorKind::Fail,
+        ))),
+        Err(NomParseError::Incomplete(_)) => Err(Error::Incomplete),
+        Err(err) => Err(Error::Parse(nom::error::VerboseError::from_error_kind(
+            err.to_string(),
+            nom::error::ErrorKind::Fail,
+        ))),
     }
 }
 
@@ -187,12 +186,12 @@ mod tests {
         let input = b"$-1\r\n";
 
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::Null));
+        assert_eq!(result, Ok(Value::Null));
 
         let input = b"*-1\r\n";
 
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::NullArray));
+        assert_eq!(result, Ok(Value::NullArray));
     }
 
     #[test]
@@ -200,7 +199,7 @@ mod tests {
         let input = b"*0\r\n";
 
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::Array(vec![].into())));
+        assert_eq!(result, Ok(Value::Array(vec![].into())));
     }
 
     #[test]
@@ -208,48 +207,45 @@ mod tests {
         let input = b"$0\r\n\r\n";
 
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::BulkString(b"".to_vec().into())));
+        assert_eq!(result, Ok(Value::BulkString(b"".to_vec().into())));
     }
 
     #[test]
     fn test_parse() {
         let input = b"+OK\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::SimpleString(b"OK".to_vec().into())));
+        assert_eq!(result, Ok(Value::SimpleString(b"OK".to_vec().into())));
         //
         let input = b"$3\r\nfoo\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::BulkString(b"foo".to_vec().into())));
+        assert_eq!(result, Ok(Value::BulkString(b"foo".to_vec().into())));
         // //
         let input = b"-ERROR\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::Error(Box::from("ERROR"))));
+        assert_eq!(result, Ok(Value::Error(Rc::from("ERROR"))));
         //
         let input = b":123\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::Integer(123)));
+        assert_eq!(result, Ok(Value::Integer(123)));
         //
         let input = b":-123\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(RedisValue::Integer(-123)));
+        assert_eq!(result, Ok(Value::Integer(-123)));
 
         let input = b"*1\r\n:523\r\n";
         let result = parse(input);
-        assert_eq!(
-            result,
-            Ok(RedisValue::Array(vec![RedisValue::Integer(523)].into()))
-        );
+        assert_eq!(result, Ok(Value::Array(vec![Value::Integer(523)].into())));
 
         let input = b"*4\r\n$4\r\nECHO\r\n$5\r\nHello\r\n$5\r\nWorld\r\n+Hello\r\n";
         let result = parse(input);
         assert_eq!(
             result,
-            Ok(RedisValue::Array(
+            Ok(Value::Array(
                 vec![
-                    RedisValue::BulkString(b"ECHO".to_vec().into()),
-                    RedisValue::BulkString(b"Hello".to_vec().into()),
-                    RedisValue::BulkString(b"World".to_vec().into()),
-                    RedisValue::SimpleString(b"Hello".to_vec().into()),
+                    Value::BulkString(b"ECHO".to_vec().into()),
+                    Value::BulkString(b"Hello".to_vec().into()),
+                    Value::BulkString(b"World".to_vec().into()),
+                    Value::SimpleString(b"Hello".to_vec().into()),
                 ]
                     .into()
             ))
@@ -260,6 +256,6 @@ mod tests {
     fn test_not_enough_data() {
         let input = b":123";
         let result = parse(input);
-        assert_eq!(result, Err(ParserError::Incomplete));
+        assert_eq!(result, Err(Error::Incomplete));
     }
 }

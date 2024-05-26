@@ -1,0 +1,22 @@
+[package]
+name = "redis"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes = "1.6.0"
+nom = "7.1.3"
+serde = { version = "1.0.202", features = ["rc", "derive", "serde_derive"] }
+thiserror = "1.0.61"
+sharded-slab = "0.1.7"
+tracing = { version = "0.1.40", features = ["async-await", "attributes"] }
+tokio = { version = "1.37.0", features = ["fs", "net", "bytes", "io-util", "sync", "rt-multi-thread"] }
+phf = { version = "0.11.1", features = ["uncased"] }
+uncased = "0.9"
+itoa = "1.0"
+
+
+[build-dependencies]
+phf = { version = "0.11.1", features = ["uncased"] }
+phf_codegen = "0.11.1"
+uncased = "0.9"
