@@ -282,6 +282,7 @@ name = "redis-starter-rust"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "itoa",
  "nom",
  "serde",
  "sharded-slab",
