@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use tracing_subscriber::{filter::EnvFilter, fmt::layer as fmt_layer, prelude::*, registry};
 
-use redis::start_server;
+use redis_starter_rust::start_server;
 
 #[tokio::main]
 async fn main() {

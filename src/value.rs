@@ -79,7 +79,7 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
-    use crate::{array, error, bulk_string, integer, null, null_array, simple_string};
+    use crate::{array, crate::error, bulk_string, integer, null, null_array, simple_string};
     use super::*;
 
     #[test]
