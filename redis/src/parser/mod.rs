@@ -4,8 +4,7 @@ use tracing::error;
 
 use crate::{Command, COMMAND_KEYWORDS, CommandKeywords, value::Value};
 
-use super::error::Error;
-use super::resp::parse as parse_input;
+use crate::resp::parse as parse_input;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Parser {
@@ -15,6 +14,26 @@ pub struct Parser {
 unsafe impl Send for Parser {}
 
 unsafe impl Sync for Parser {}
+
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Invalid command")]
+    InvalidCommand,
+
+    #[error("command does not exist")]
+    NotExists,
+
+    #[error("Invalid arguments given to the command {0}: {1}")]
+    InvalidArguments(&'static str, &'static str),
+
+    #[error("Failed to parse input: {0}")]
+    ParseError(#[from] super::resp::Error),
+
+    #[error("Invalid UTF8 Input: {0}")]
+    Utf8(#[from] std::str::Utf8Error),
+
+}
 
 impl Parser {
     pub fn parse(input: impl AsRef<[u8]>) -> Result<Self, Error> {
@@ -94,7 +113,7 @@ impl Parser {
 
 #[cfg(test)]
 mod tests {
-    use crate::{array, bulk_string, simple_string};
+    use crate::{array, bulk_string, Command, simple_string};
 
     use super::*;
 

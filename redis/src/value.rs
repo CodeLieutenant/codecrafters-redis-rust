@@ -29,6 +29,8 @@ impl Value {
 
     #[instrument]
     pub fn serialize(self, output: &mut Vec<u8>) {
+        let mut buf = itoa::Buffer::new();
+
         match self {
             Value::Null => output.extend_from_slice(b"$-1\r\n"),
             Value::NullArray => output.extend_from_slice(b"*-1\r\n"),
@@ -44,64 +46,60 @@ impl Value {
                 output.extend_from_slice(val.as_bytes());
                 output.extend_from_slice(b"\r\n");
             }
-            Value::Integer(_) => {
-                // output.reserve(val.len() + 3);
-                // output.push(b':');
-                // output.extend_from_slice(buf.format(val).into());
-                // output.extend_from_slice(b"\r\n");
+            Value::Integer(val) => {
+                let data = buf.format(val);
+                output.reserve(data.len() + 3);
+                output.push(b':');
+                output.extend_from_slice(data.as_bytes());
+                output.extend_from_slice(b"\r\n");
             }
-            Value::BulkString(_) => {
-                // let fmt = buf.format(&val);
-                // output.reserve(val.len() + fmt.len() + 5);
+            Value::BulkString(val) => {
+                let fmt = buf.format(val.len());
+                output.reserve(val.len() + fmt.len() + 5);
 
-                // output.push(b'$');
-                // output.extend_from_slice(fmt.into());
-                // output.extend_from_slice(b"\r\n");
-                // output.extend_from_slice(&val);
-                // output.extend_from_slice(b"\r\n");
+                output.push(b'$');
+                output.extend_from_slice(fmt.as_bytes());
+                output.extend_from_slice(b"\r\n");
+                output.extend_from_slice(&val);
+                output.extend_from_slice(b"\r\n");
             }
-            Value::Array(_) => {}
+            Value::Array(array) => {
+                let fmt = buf.format(array.len());
+                output.reserve(fmt.len() + 3);
+
+                output.push(b'*');
+                output.extend_from_slice(fmt.as_bytes());
+                output.extend_from_slice(b"\r\n");
+
+                array.into_vec().drain(..).for_each(|value| value.serialize(output));
+            }
         }
-    }
-}
-
-pub(crate) mod macros {
-    #[macro_export] macro_rules! null {
-        () => {
-            Value::Null
-        }
-    }
-
-    #[macro_export] macro_rules! null_array {
-        () => {
-            Value::NullArray
-        }
-    }
-
-    #[macro_export] macro_rules! simple_string {
-        ($data: expr) => {{
-            let bytes: &[u8] = { $data };
-            let rc: Rc<[u8]> = std::rc::Rc::from(bytes);
-            Value::SimpleString(rc)
-        }}
-    }
-
-    #[macro_export] macro_rules! bulk_string {
-        ($data: expr) => {{
-            let bytes: &[u8] = { $data };
-            let rc: Rc<[u8]> = std::rc::Rc::from(bytes);
-            Value::BulkString(rc)
-        }}
-    }
-
-    #[macro_export] macro_rules! array {
-        [$($data:expr),+] => {{
-                 let bytes: &[Value] = &[$($data),+];
-                 let b: Box<[Value]> = Box::from(bytes);
-                 Value::Array(b)
-        }}
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::{array, error, bulk_string, integer, null, null_array, simple_string};
+    use super::*;
+
+    #[test]
+    fn test_serialize() {
+        let value = array!(
+            null!(),
+            null_array!(),
+            integer!(100),
+            bulk_string!(b"Hello World"),
+            simple_string!(b"Hello World"),
+            error!("SOME ERROR")
+        );
+
+        let mut output = Vec::new();
+        let serialized = value.serialize(&mut output);
+        let output = String::from_utf8(output).unwrap();
+
+        assert_eq!(
+            output.as_str(),
+            "*6\r\n$-1\r\n*-1\r\n:100\r\n$11\r\nHello World\r\n+Hello World\r\n-SOME ERROR\r\n"
+        );
+    }
+}

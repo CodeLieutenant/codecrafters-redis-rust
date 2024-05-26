@@ -19,7 +19,7 @@ tracing-subscriber = { version = "0.3.18", features = [
     "env-filter",
 ] }
 
-redis = { path = "redis" }
+redis = { path = "./redis" }
 
 [workspace]
 members = ["redis"]

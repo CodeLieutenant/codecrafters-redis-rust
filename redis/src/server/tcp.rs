@@ -17,13 +17,20 @@ pub enum Error {
 
     #[error("Failed to acquire token to accept new client: {0}")]
     ClientsAcquireToken(#[from] AcquireError),
+
+    #[error("Client error: {0}")]
+    Client(#[from] crate::server::handler::Error),
+
+    #[error("Failed to acquire data from pool")]
+    AcquirePool,
 }
 
 #[derive(Debug)]
 pub(crate) struct Server {
     listener: TcpListener,
     connection_limit: Arc<Semaphore>,
-    pool: Arc<sharded_slab::Pool<super::bytes::Buffer>>,
+    buf_pool: Arc<sharded_slab::Pool<super::bytes::Buffer>>,
+    vec_pool: Arc<sharded_slab::Pool<Vec<u8>>>,
 }
 
 impl Server {
@@ -37,7 +44,8 @@ impl Server {
         Ok(Self {
             listener,
             connection_limit: Semaphore::new(connection_limit).into(),
-            pool: sharded_slab::Pool::new().into(),
+            buf_pool: sharded_slab::Pool::new().into(),
+            vec_pool: sharded_slab::Pool::new().into(),
         })
     }
 
@@ -45,15 +53,18 @@ impl Server {
     async fn accept_client(&self, token: OwnedSemaphorePermit) -> Result<(), Error> {
         let (client, _socket) = self.listener.accept().await.map_err(Error::AcceptClient)?;
 
-        let pool = Arc::clone(&self.pool);
+        let pool = Arc::clone(&self.buf_pool);
+        let output_pool = Arc::clone(&self.vec_pool);
         tokio::spawn(async move {
-            let mut item = pool.create_owned().unwrap();
-            let mut handler = Handler::new(client, &mut item);
+            let mut item = pool.create_owned().ok_or(Error::AcquirePool)?;
+            let mut output = output_pool.create_owned().ok_or(Error::AcquirePool)?;
+            let mut handler = Handler::new(client, &mut item, &mut output);
 
-            handler.run().await.unwrap();
+            handler.run().await?;
 
             drop(handler);
             drop(token);
+            Ok::<(), Error>(())
         });
 
         Ok(())

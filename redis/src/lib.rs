@@ -7,10 +7,11 @@ use crate::server::tcp::{Error, Server as InnerRedisServer};
 include!(concat!(env!("OUT_DIR"), "/commands.rs"));
 
 pub mod error;
-mod parser;
 mod resp;
 pub(crate) mod server;
 pub mod value;
+pub(crate) mod parser;
+mod macros;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
