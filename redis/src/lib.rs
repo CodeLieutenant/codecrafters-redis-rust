@@ -1,5 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 
 use crate::server::tcp::{Error, Server as InnerRedisServer};
 
@@ -14,8 +15,15 @@ pub mod value;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Ping,
-    Echo(Box<str>),
+    Echo(Rc<[u8]>),
 }
+
+// Safety -> This technically is not true
+// as Rc is not Send + Sync, but Command is handle at most in one thread,
+// even if it crosses thread boundaries, there is no concurrent access on Command
+unsafe impl Send for Command {}
+
+unsafe impl Sync for Command {}
 
 pub trait Server {
     fn run(&self) -> Pin<Box<dyn Future<Output=Result<(), Error>> + '_>>;

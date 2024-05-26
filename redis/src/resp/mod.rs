@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use nom::{Err as NomParseError, IResult, Parser as NomParser};
 use nom::branch::alt;
 use nom::bytes::streaming::take_until;
@@ -75,7 +77,12 @@ fn parse_bulk_string(input: &[u8]) -> RespResult {
     }
 
     if result == 0i64 {
-        return map(line_ending, |_| Value::BulkString(Default::default())).parse(rest);
+        return map(line_ending, |_| {
+            let rc: &[u8] = b"";
+            let rc: Rc<[u8]> = Rc::from(rc);
+            Value::BulkString(rc)
+        })
+            .parse(rest);
     }
 
     map(terminated(take_until("\r"), line_ending), |val: &[u8]| {
@@ -215,7 +222,7 @@ mod tests {
         // //
         let input = b"-ERROR\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(Value::Error(Box::from("ERROR"))));
+        assert_eq!(result, Ok(Value::Error(Rc::from("ERROR"))));
         //
         let input = b":123\r\n";
         let result = parse(input);
