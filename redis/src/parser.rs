@@ -93,4 +93,39 @@ impl Parser {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use crate::{array, bulk_string, simple_string};
+
+    use super::*;
+
+    #[test]
+    fn test_parse_ping_command() {
+        let parser = Parser {
+            ast: simple_string!(b"PING"),
+        };
+
+        let result = parser.command();
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Command::Ping);
+
+
+        let parser = Parser {
+            ast: array![simple_string!(b"PING")],
+        };
+
+        let result = parser.command();
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Command::Ping);
+
+        let parser = Parser {
+            ast: array![bulk_string!(b"PING")],
+        };
+
+        let result = parser.command();
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Command::Ping);
+    }
+}
