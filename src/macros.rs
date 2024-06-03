@@ -22,58 +22,37 @@ macro_rules! integer {
 #[macro_export]
 macro_rules! simple_string {
     ($data: expr) => {{
-        let bytes: &[u8] = { $data };
-        let rc: std::rc::Rc<[u8]> = std::rc::Rc::from(bytes);
-        Value::SimpleString(rc)
-    }};
-}
-
-#[macro_export]
-macro_rules! simple_string_rc {
-    ($rc: expr) => {{
-        let rc: std::rc::Rc<[u8]> = std::rc::Rc::clone($rc);
-        Value::SimpleString(rc)
+        Value::SimpleString(std::borrow::Cow::Borrowed($data))
     }};
 }
 
 #[macro_export]
 macro_rules! error {
-    ($data: expr) => {{
-        let bytes: &str = { $data };
-        let rc: std::rc::Rc<str> = std::rc::Rc::from(bytes);
-        Value::Error(rc)
-    }};
-}
-#[macro_export]
-macro_rules! error_rc {
-    ($rc: expr) => {{
-        let rc: std::rc::Rc<str> = std::rc::Rc::clone($c);
-        Value::Error(rc)
-    }};
+    ($data: expr) => {
+        Value::Error(std::borrow::Cow::Borrowed($data))
+    };
 }
 
 #[macro_export]
 macro_rules! bulk_string {
-    ($data: expr) => {{
-        let bytes: &[u8] = { $data };
-        let rc: std::rc::Rc<[u8]> = std::rc::Rc::from(bytes);
-        Value::BulkString(rc)
-    }};
-}
-
-#[macro_export]
-macro_rules! bulk_string_rc {
-    ($rc: expr) => {{
-        let rc: std::rc::Rc<[u8]> = { std::rc::Rc::clone($rc) };
-        Value::BulkString(rc)
-    }};
+    ($data: expr) => {
+        Value::BulkString(std::borrow::Cow::Borrowed($data))
+    };
 }
 
 #[macro_export]
 macro_rules! array {
-        [$($data:expr),+] => {{
-                 let bytes: &[Value] = &[$($data),+];
-                 let b: Box<[Value]> = Box::from(bytes);
-                 Value::Array(b)
-        }}
-    }
+    [$($data:expr),+] => {{
+             let bytes: &[Value] = &[$($data),+];
+             let b: Box<[Value]> = Box::from(bytes);
+             Value::Array(b)
+    }}
+}
+#[macro_export]
+macro_rules! array_box {
+    [$($data:expr),+] => {{
+        let bytes: &[Value] = &[$($data),+];
+        let b: Box<[Value]> = Box::from(bytes);
+        b
+    }}
+}

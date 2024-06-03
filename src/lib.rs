@@ -1,11 +1,14 @@
+use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
-use std::rc::Rc;
 
 use crate::server::tcp::{Error, Server as InnerRedisServer};
 
-include!(concat!(env!("OUT_DIR"), "/commands.rs"));
+mod redis_commands {
+    include!(concat!(env!("OUT_DIR"), "/commands.rs"));
+}
 
+mod bytes;
 pub mod error;
 mod macros;
 pub(crate) mod parser;
@@ -14,18 +17,20 @@ pub(crate) mod server;
 pub mod value;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum Command {
+pub enum Command<'a> {
     Ping,
     Command,
-    Echo(Rc<[u8]>),
+    Echo(Cow<'a, str>),
+    Get(Cow<'a, str>),
+    Set { key: Cow<'a, str> },
 }
 
 // Safety -> This technically is not true
 // as Rc is not Send + Sync, but Command is handle at most in one thread,
 // even if it crosses thread boundaries, there is no concurrent access on Command
-unsafe impl Send for Command {}
+unsafe impl<'a> Send for Command<'a> {}
 
-unsafe impl Sync for Command {}
+unsafe impl<'a> Sync for Command<'a> {}
 
 pub trait Server {
     fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + '_>>;

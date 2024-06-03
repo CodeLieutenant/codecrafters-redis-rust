@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::bytes::Buffer;
 use tokio::io;
 use tokio::net::TcpListener;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit, Semaphore};
@@ -20,16 +21,13 @@ pub enum Error {
 
     #[error("Client error: {0}")]
     Client(#[from] crate::server::handler::Error),
-
-    #[error("Failed to acquire data from pool")]
-    AcquirePool,
 }
 
 #[derive(Debug)]
 pub(crate) struct Server {
     listener: TcpListener,
     connection_limit: Arc<Semaphore>,
-    buf_pool: Arc<sharded_slab::Pool<super::bytes::Buffer>>,
+    buf_pool: Arc<sharded_slab::Pool<Buffer>>,
     vec_pool: Arc<sharded_slab::Pool<Vec<u8>>>,
 }
 
@@ -56,9 +54,7 @@ impl Server {
         let pool = Arc::clone(&self.buf_pool);
         let output_pool = Arc::clone(&self.vec_pool);
         tokio::spawn(async move {
-            let mut item = pool.create_owned().ok_or(Error::AcquirePool)?;
-            let mut output = output_pool.create_owned().ok_or(Error::AcquirePool)?;
-            let mut handler = Handler::new(client, &mut item, &mut output);
+            let mut handler = Handler::new(client, pool, output_pool);
 
             match handler.run().await {
                 Ok(_) => info!("Closing client"),

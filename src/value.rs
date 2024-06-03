@@ -1,22 +1,25 @@
-use nom::AsBytes;
 use serde::Serializer;
+use std::borrow::Cow;
+use std::error::Error;
 use std::fmt::{Debug, Formatter};
-use std::rc::Rc;
 
 use tracing::instrument;
 
 #[derive(Clone, PartialEq)]
-pub enum Value {
+pub enum Value<'a> {
     Null,
     NullArray,
-    SimpleString(Rc<[u8]>),
-    Error(Rc<str>),
+    SimpleString(Cow<'a, str>),
+    Error(Cow<'a, str>),
     Integer(i64),
-    BulkString(Rc<[u8]>),
-    Array(Box<[Value]>),
+    BulkString(Cow<'a, str>),
+    Array(Box<[Value<'a>]>),
 }
 
-impl Debug for Value {
+pub(crate) const OK: &[u8] = b"+OK\r\n";
+pub(crate) const PONG: &[u8] = b"+PONG\r\n";
+
+impl<'a> Debug for Value<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Value::Null => f.write_str("NULL"),
@@ -51,7 +54,13 @@ impl Debug for Value {
     }
 }
 
-impl Value {
+impl<'a> From<&dyn Error> for Value<'a> {
+    fn from(value: &dyn Error) -> Self {
+        Self::Error(value.to_string().into())
+    }
+}
+
+impl<'a> Value<'a> {
     #[instrument]
     pub fn value_type(&self) -> &'static str {
         match self {
@@ -75,7 +84,7 @@ impl Value {
             Value::SimpleString(val) => {
                 output.reserve(val.len() + 3);
                 output.push(b'+');
-                output.extend_from_slice(&val);
+                output.extend_from_slice(val.as_bytes());
                 output.extend_from_slice(b"\r\n");
             }
             Value::Error(val) => {
@@ -98,7 +107,7 @@ impl Value {
                 output.push(b'$');
                 output.extend_from_slice(fmt.as_bytes());
                 output.extend_from_slice(b"\r\n");
-                output.extend_from_slice(&val);
+                output.extend_from_slice(val.as_bytes());
                 output.extend_from_slice(b"\r\n");
             }
             Value::Array(array) => {
@@ -121,7 +130,7 @@ impl Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{crate::error, array, bulk_string, integer, null, null_array, simple_string};
+    use crate::{array, bulk_string, error, integer, null, null_array, simple_string};
 
     #[test]
     fn test_serialize() {
@@ -129,13 +138,13 @@ mod tests {
             null!(),
             null_array!(),
             integer!(100),
-            bulk_string!(b"Hello World"),
-            simple_string!(b"Hello World"),
+            bulk_string!("Hello World"),
+            simple_string!("Hello World"),
             error!("SOME ERROR")
         );
 
         let mut output = Vec::new();
-        let serialized = value.serialize(&mut output);
+        value.serialize(&mut output);
         let output = String::from_utf8(output).unwrap();
 
         assert_eq!(

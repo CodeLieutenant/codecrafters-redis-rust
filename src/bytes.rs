@@ -6,7 +6,7 @@ use sharded_slab::Clear;
 const CAPACITY: usize = 64 * 1024;
 
 #[derive(Debug)]
-pub(super) struct Buffer(BytesMut);
+pub(crate) struct Buffer(pub(crate) BytesMut);
 
 impl Clear for Buffer {
     fn clear(&mut self) {

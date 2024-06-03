@@ -1,4 +1,5 @@
-use std::rc::Rc;
+use std::borrow::Cow;
+use std::str::Utf8Error;
 
 use nom::branch::alt;
 use nom::bytes::streaming::take_until;
@@ -12,7 +13,7 @@ use tracing::instrument;
 
 use crate::value::Value;
 
-type RespResult<'a> = IResult<&'a [u8], Value, nom::error::VerboseError<&'a [u8]>>;
+type RespResult<'a> = IResult<&'a [u8], Value<'a>, nom::error::VerboseError<&'a [u8]>>;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum OutOfRangeType {
@@ -55,7 +56,12 @@ fn parse_simple<'a>(
 #[instrument]
 #[inline]
 fn parse_simple_string(input: &[u8]) -> RespResult {
-    parse_simple('+', |val| Ok(Value::SimpleString(val.into()))).parse(input)
+    parse_simple('+', |val| {
+        Ok(Value::SimpleString(Cow::Borrowed(
+            std::str::from_utf8(val).unwrap(),
+        )))
+    })
+    .parse(input)
 }
 
 #[instrument]
@@ -67,6 +73,8 @@ fn parse_simple_error(input: &[u8]) -> RespResult {
     .parse(input)
 }
 
+const EMTPY: Cow<'static, str> = Cow::Owned(String::new());
+
 #[instrument]
 #[inline]
 fn parse_bulk_string(input: &[u8]) -> RespResult {
@@ -77,16 +85,11 @@ fn parse_bulk_string(input: &[u8]) -> RespResult {
     }
 
     if result == 0i64 {
-        return map(line_ending, |_| {
-            let rc: &[u8] = b"";
-            let rc: Rc<[u8]> = Rc::from(rc);
-            Value::BulkString(rc)
-        })
-        .parse(rest);
+        return map(line_ending, |_| Value::BulkString(EMTPY)).parse(rest);
     }
 
-    map(terminated(take_until("\r"), line_ending), |val: &[u8]| {
-        Value::BulkString(val.into())
+    map_res(terminated(take_until("\r"), line_ending), |val: &[u8]| {
+        Ok::<Value, Utf8Error>(Value::BulkString(Cow::Borrowed(std::str::from_utf8(val)?)))
     })
     .parse(rest)
 }
@@ -162,7 +165,7 @@ fn parse_array(input: &[u8]) -> RespResult {
 
 #[inline]
 #[instrument]
-pub(super) fn parse(input: &[u8]) -> Result<Value, Error> {
+pub(super) fn parse<'a>(input: &'a [u8]) -> Result<Value<'a>, Error> {
     match all_consuming(parse_any).parse(input) {
         Ok((&[], redis_type)) => Ok(redis_type),
         Ok((rest, _)) => Err(Error::Parse(nom::error::VerboseError::from_error_kind(
@@ -180,6 +183,14 @@ pub(super) fn parse(input: &[u8]) -> Result<Value, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    macro_rules! cow {
+        ($data: expr) => {{
+            let item: &str = { $data };
+
+            std::borrow::Cow::Borrowed(item)
+        }};
+    }
 
     #[test]
     fn test_parse_nulls() {
@@ -207,22 +218,22 @@ mod tests {
         let input = b"$0\r\n\r\n";
 
         let result = parse(input);
-        assert_eq!(result, Ok(Value::BulkString(b"".to_vec().into())));
+        assert_eq!(result, Ok(Value::BulkString(cow!(""))));
     }
 
     #[test]
     fn test_parse() {
         let input = b"+OK\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(Value::SimpleString(b"OK".to_vec().into())));
+        assert_eq!(result, Ok(Value::SimpleString(cow!("OK"))));
         //
         let input = b"$3\r\nfoo\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(Value::BulkString(b"foo".to_vec().into())));
+        assert_eq!(result, Ok(Value::BulkString(cow!("foo"))));
         // //
         let input = b"-ERROR\r\n";
         let result = parse(input);
-        assert_eq!(result, Ok(Value::Error(Rc::from("ERROR"))));
+        assert_eq!(result, Ok(Value::Error(cow!("ERROR"))));
         //
         let input = b":123\r\n";
         let result = parse(input);
@@ -242,10 +253,10 @@ mod tests {
             result,
             Ok(Value::Array(
                 vec![
-                    Value::BulkString(b"ECHO".to_vec().into()),
-                    Value::BulkString(b"Hello".to_vec().into()),
-                    Value::BulkString(b"World".to_vec().into()),
-                    Value::SimpleString(b"Hello".to_vec().into()),
+                    Value::BulkString(cow!("ECHO")),
+                    Value::BulkString(cow!("Hello")),
+                    Value::BulkString(cow!("World")),
+                    Value::SimpleString(cow!("Hello")),
                 ]
                 .into()
             ))

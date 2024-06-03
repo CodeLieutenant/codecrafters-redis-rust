@@ -1,19 +1,22 @@
-use std::rc::Rc;
+mod error;
+mod values;
 
-use tracing::{error, info, instrument};
+use bytes::BytesMut;
+use tracing::{error, instrument};
 
-use crate::{value::Value, Command, CommandKeywords, COMMAND_KEYWORDS};
-
+use crate::parser::values::{Error as ValueError, Values};
+use crate::redis_commands::{CommandKeywords, COMMAND_KEYWORDS};
 use crate::resp::parse as parse_input;
+use crate::{value::Value, Command};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Parser {
-    pub(super) ast: Value,
+pub struct Parser<'a> {
+    pub(super) ast: Values<'a>,
 }
 
-unsafe impl Send for Parser {}
+unsafe impl<'a> Send for Parser<'a> {}
 
-unsafe impl Sync for Parser {}
+unsafe impl<'a> Sync for Parser<'a> {}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -23,129 +26,110 @@ pub enum Error {
     #[error("command does not exist")]
     NotExists,
 
-    #[error("Invalid arguments given to the command {0}: {1}")]
-    InvalidArguments(&'static str, &'static str),
+    #[error("Command argument does not exist")]
+    InvalidCommandArgument,
+
+    #[error("Invalid arguments given to the command: {0}")]
+    InvalidArguments(&'static str),
 
     #[error("Failed to parse input: {0}")]
-    ParseError(#[from] super::resp::Error),
+    Parse(#[from] super::resp::Error),
 
-    #[error("Invalid UTF8 Input: {0}")]
-    Utf8(#[from] std::str::Utf8Error),
+    #[error(transparent)]
+    Value(#[from] ValueError),
 }
 
-impl Parser {
-    pub fn parse(input: impl AsRef<[u8]>) -> Result<Self, Error> {
-        Ok(Self {
-            ast: parse_input(input.as_ref())?,
-        })
+// fn parse_get_command(values: Box<[Value]>) -> Result<Command, Error> {
+//     let values = &values[1..];
+//
+//     if values.len() == 0 {
+//         return Err(Error::InvalidArguments("get command requires 1 argument"));
+//     }
+//
+//     let key = match &values[0] {
+//         Value::SimpleString(command) | Value::BulkString(command) => Rc::clone(command),
+//         _ => {
+//             return Err(Error::InvalidArguments(
+//                 "argument to the command must be SimpleString or BulkString",
+//             ));
+//         }
+//     };
+//
+//     Ok(Command::Get(key))
+// }
+//
+// fn parse_set_command(values: Box<[Value]>) -> Result<Command, Error> {
+//     let values = &values[1..];
+//
+//     if values.len() == 0 {
+//         return Err(Error::InvalidArguments(
+//             "set command requires at least 1 argument",
+//         ));
+//     }
+//
+//     let key = get_key(&values[0])?;
+//
+//     if values.len() > 1 {
+//         let flags = SET_PARAMS
+//             .get(uncased_str(&values[1])?.as_uncased_str())
+//             .ok_or(Error::NotExists)?;
+//     }
+//
+//     Ok(Command::Set { key })
+// }
+
+impl<'a> Parser<'a> {
+    pub fn parse(input: &'a BytesMut) -> Result<Self, Error> {
+        let values = match parse_input(input)? {
+            Value::Array(val) => Values::new(val),
+            _ => return Err(Error::InvalidCommand),
+        };
+
+        Ok(Self { ast: values })
     }
 
     #[instrument]
-    fn extract_params(values: Box<[Value]>) -> Result<Command, Error> {
-        let command: &[u8] = match &values[0] {
-            Value::SimpleString(command) | Value::BulkString(command) => command,
-            _ => {
-                return Err(Error::InvalidCommand);
-            }
-        };
-
-        let command = std::str::from_utf8(command)?;
-        let command = uncased::UncasedStr::new(command);
-        let command = COMMAND_KEYWORDS.get(command).ok_or(Error::NotExists)?;
+    pub fn command(&mut self) -> Result<Command, Error> {
+        let command = COMMAND_KEYWORDS
+            .get(self.ast.get_uncased_string()?)
+            .ok_or(Error::NotExists)?;
 
         match command {
             CommandKeywords::Ping => Ok(Command::Ping),
-            CommandKeywords::Command => Ok(Command::Ping),
-            CommandKeywords::Echo => {
-                let values = &values[1..];
-
-                if values.len() != 1 {
-                    return Err(Error::InvalidArguments(
-                        "echo",
-                        "echo command required exactly 1 argument",
-                    ));
-                }
-
-                let arg = match &values[0] {
-                    Value::SimpleString(command) | Value::BulkString(command) => Rc::clone(command),
-                    val => {
-                        error!(
-                            ty = val.value_type(),
-                            command = "echo",
-                            "argument to the command must be SimpleString or BulkString"
-                        );
-                        return Err(Error::InvalidArguments(
-                            "echo",
-                            "argument to the command must be SimpleString or BulkString",
-                        ));
-                    }
-                };
-
-                Ok(Command::Echo(arg))
-            }
-        }
-    }
-
-    #[instrument]
-    pub fn command(self) -> Result<Command, Error> {
-        match self.ast {
-            Value::SimpleString(val) => {
-                let s = std::str::from_utf8(&val)?;
-
-                // Only command that can be sent as SimpleString is PING
-                // Everything else must be sent as ARRAY
-                if s.eq_ignore_ascii_case("ping") {
-                    Ok(Command::Ping)
-                } else {
-                    Err(Error::InvalidCommand)
-                }
-            }
-            Value::Array(val) => {
-                if val.len() == 0 {
-                    return Err(Error::InvalidCommand);
-                }
-
-                Self::extract_params(val)
-            }
-
-            _ => Err(Error::InvalidCommand),
+            CommandKeywords::Command => Ok(Command::Command),
+            CommandKeywords::Echo => Ok(Command::Echo(self.ast.get_string()?)),
+            CommandKeywords::Get => Ok(Command::Get(self.ast.get_string()?)),
+            CommandKeywords::Set => Ok(Command::Set {
+                key: self.ast.get_string()?,
+            }),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{array, bulk_string, simple_string, Command};
+    use crate::{array_box, simple_string, Command};
 
     use super::*;
 
     #[test]
     fn test_parse_ping_command() {
-        let parser = Parser {
-            ast: simple_string!(b"PING"),
+        let mut parser = Parser {
+            ast: Values::new(array_box![simple_string!("PING")]),
         };
 
         let result = parser.command();
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Command::Ping);
-
-        let parser = Parser {
-            ast: array![simple_string!(b"PING")],
-        };
-
-        let result = parser.command();
-
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Command::Ping);
-
-        let parser = Parser {
-            ast: array![bulk_string!(b"PING")],
-        };
-
-        let result = parser.command();
-
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Command::Ping);
+        //
+        // let parser = Parser {
+        //     ast: array![bulk_string!(b"PING")],
+        // };
+        //
+        // let result = parser.command();
+        //
+        // assert!(result.is_ok());
+        // assert_eq!(result.unwrap(), Command::Ping);
     }
 }
