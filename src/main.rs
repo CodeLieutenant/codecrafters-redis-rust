@@ -29,6 +29,7 @@ async fn main() {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!("Receiving CTRL+C... Exiting...");
+                    exit(0);
                 },
                 result = server.run() => {
                      if let Err(err) = result {
@@ -39,7 +40,7 @@ async fn main() {
         }
 
         Err(err) => {
-            eprintln!("{:?}", err);
+            error!("{:?}", err);
             exit(1);
         }
     }

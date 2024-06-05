@@ -21,7 +21,7 @@ unsafe impl<'a> Sync for Parser<'a> {}
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Invalid command")]
-    InvalidCommand,
+    InvalidInput,
 
     #[error("command does not exist")]
     NotExists,
@@ -82,7 +82,7 @@ impl<'a> Parser<'a> {
     pub fn parse(input: &'a BytesMut) -> Result<Self, Error> {
         let values = match parse_input(input)? {
             Value::Array(val) => Values::new(val),
-            _ => return Err(Error::InvalidCommand),
+            _ => return Err(Error::InvalidInput),
         };
 
         Ok(Self { ast: values })
@@ -101,6 +101,8 @@ impl<'a> Parser<'a> {
             CommandKeywords::Get => Ok(Command::Get(self.ast.get_string()?)),
             CommandKeywords::Set => Ok(Command::Set {
                 key: self.ast.get_string()?,
+                value: self.ast.get_string()?,
+                expiration_ms: -1,
             }),
         }
     }

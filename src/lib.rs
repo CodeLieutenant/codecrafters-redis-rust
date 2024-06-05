@@ -2,15 +2,15 @@ use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::server::tcp::{Error, Server as InnerRedisServer};
+use crate::server::tcp::Server as InnerRedisServer;
 
 mod redis_commands {
     include!(concat!(env!("OUT_DIR"), "/commands.rs"));
 }
 
 mod bytes;
-pub mod error;
 mod macros;
+
 pub(crate) mod parser;
 mod resp;
 pub(crate) mod server;
@@ -22,7 +22,11 @@ pub enum Command<'a> {
     Command,
     Echo(Cow<'a, str>),
     Get(Cow<'a, str>),
-    Set { key: Cow<'a, str> },
+    Set {
+        key: Cow<'a, str>,
+        value: Cow<'a, str>,
+        expiration_ms: i64,
+    },
 }
 
 // Safety -> This technically is not true
@@ -33,13 +37,13 @@ unsafe impl<'a> Send for Command<'a> {}
 unsafe impl<'a> Sync for Command<'a> {}
 
 pub trait Server {
-    fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + '_>>;
+    fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + '_>>;
 }
 
 struct RedisServer(InnerRedisServer);
 
 impl Server for RedisServer {
-    fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + '_>> {
+    fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + '_>> {
         Box::pin(self.0.start())
     }
 }
@@ -47,7 +51,7 @@ impl Server for RedisServer {
 pub async fn start_server(
     port: u16,
     connection_limit: usize,
-) -> Result<Box<dyn Server>, error::Error> {
+) -> Result<Box<dyn Server>, std::io::Error> {
     let server = Box::new(RedisServer(
         InnerRedisServer::new(port, connection_limit).await?,
     ));

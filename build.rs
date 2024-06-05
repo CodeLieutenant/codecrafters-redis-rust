@@ -50,6 +50,6 @@ fn main() {
             .entry("px".into(), "SetParams::PX")
             .build()
     )
-        .expect("Failed to write SET_PARAMS to file");
+    .expect("Failed to write SET_PARAMS to file");
     writeln!(&mut file, ";").expect("Failed to write new line to file");
 }

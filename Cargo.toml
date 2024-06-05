@@ -8,7 +8,7 @@ authors = [
 edition = "2021"
 
 [dependencies]
-tokio = { version = "1.37.0", features = ["full"] }
+tokio = { version = "1.37.0", features = ["full", "parking_lot", "io-std", "tracing", "test-util"] }
 tracing = { version = "0.1.40", features = ["async-await", "attributes"] }
 tracing-appender = { version = "0.2.3", features = ["parking_lot"] }
 tracing-subscriber = { version = "0.3.18", features = [

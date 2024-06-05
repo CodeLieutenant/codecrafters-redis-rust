@@ -1,12 +1,16 @@
 use crate::value::Value;
 use std::borrow::Cow;
-use tracing::error;
+use std::cell::Cell;
+use tracing::{error, instrument};
 use uncased::UncasedStr;
 
 #[derive(thiserror::Error, Debug, Clone)]
 pub enum Error {
     #[error("Invalid Type: {0}")]
     InvalidType(&'static str),
+
+    #[error("Invalid number")]
+    InvalidNumber,
 
     #[error("Invalid UTF8 Input: {0}")]
     Utf8(#[from] std::str::Utf8Error),
@@ -18,19 +22,23 @@ pub enum Error {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Values<'a> {
     values: Box<[Value<'a>]>,
-    idx: isize,
+    idx: Cell<isize>,
 }
 
 impl<'a> Values<'a> {
     #[inline]
+    #[instrument]
     pub(crate) fn new(values: Box<[Value<'a>]>) -> Self {
-        Self { values, idx: -1 }
+        Self { values, idx: Cell::new(-1) }
     }
 
     #[inline]
-    pub(crate) fn get_number(&mut self) -> Result<i64, Error> {
+    #[instrument]
+    pub(crate) fn get_number(&self) -> Result<i64, Error> {
         let arg = match self.next()? {
-            Value::SimpleString(_command) | Value::BulkString(_command) => 0,
+            Value::SimpleString(command) | Value::BulkString(command) => command
+                .parse()
+                .map_err(|_| Error::InvalidNumber)?,
             Value::Integer(i) => *i,
             value => {
                 error!(
@@ -47,12 +55,14 @@ impl<'a> Values<'a> {
     }
 
     #[inline]
-    pub(crate) fn get_array(&mut self) -> Result<&[Value], Error> {
+    #[instrument]
+    pub(crate) fn get_array(&self) -> Result<&[Value], Error> {
         Ok(&[])
     }
 
     #[inline]
-    pub(crate) fn get_string(&mut self) -> Result<Cow<'_, str>, Error> {
+    #[instrument]
+    pub(crate) fn get_string(&self) -> Result<Cow<'_, str>, Error> {
         match self.next()? {
             Value::SimpleString(command) | Value::BulkString(command) => {
                 Ok(Cow::<'_, str>::from(command as &str))
@@ -70,7 +80,8 @@ impl<'a> Values<'a> {
     }
 
     #[inline]
-    pub(crate) fn get_uncased_string(&mut self) -> Result<&UncasedStr, Error> {
+    #[instrument]
+    pub(crate) fn get_uncased_string(&self) -> Result<&UncasedStr, Error> {
         match self.next()? {
             Value::SimpleString(command) | Value::BulkString(command) => {
                 Ok(UncasedStr::new(command))
@@ -90,15 +101,15 @@ impl<'a> Values<'a> {
 
 impl<'a> Values<'a> {
     #[inline]
-    fn next(&mut self) -> Result<&Value, Error> {
+    fn next(&self) -> Result<&Value, Error> {
+        self.idx.replace(self.idx.get() + 1);
         self.check_bounds()?;
-        self.idx += 1;
-        Ok(&self.values[self.idx as usize])
+        Ok(&self.values[self.idx.get() as usize])
     }
 
     #[inline]
     fn check_bounds(&self) -> Result<(), Error> {
-        if self.idx >= self.values.len() as isize {
+        if self.idx.get() >= self.values.len() as isize {
             Err(Error::OutOfBounds)
         } else {
             Ok(())

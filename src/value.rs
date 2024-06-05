@@ -54,8 +54,8 @@ impl<'a> Debug for Value<'a> {
     }
 }
 
-impl<'a> From<&dyn Error> for Value<'a> {
-    fn from(value: &dyn Error) -> Self {
+impl<'a> From<&(dyn Error + Send + Sync)> for Value<'a> {
+    fn from(value: &(dyn Error + Send + Sync)) -> Self {
         Self::Error(value.to_string().into())
     }
 }
