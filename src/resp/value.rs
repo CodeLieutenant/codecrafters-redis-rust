@@ -1,9 +1,9 @@
-use serde::Serializer;
 use std::borrow::Cow;
 use std::error::Error;
 use std::fmt::{Debug, Formatter};
 
 use tracing::instrument;
+use serde::Serializer;
 
 #[derive(Clone, PartialEq)]
 pub enum Value<'a> {
@@ -12,7 +12,7 @@ pub enum Value<'a> {
     SimpleString(Cow<'a, str>),
     Error(Cow<'a, str>),
     Integer(i64),
-    BulkString(Cow<'a, str>),
+    BulkString(Cow<'a, [u8]>),
     Array(Box<[Value<'a>]>),
 }
 
@@ -29,7 +29,11 @@ impl<'a> Debug for Value<'a> {
                 f.write_str(std::str::from_utf8(data.as_bytes()).unwrap())?;
                 f.write_str(")")
             }
-            Value::Error(err) => f.write_str(std::str::from_utf8(err.as_bytes()).unwrap()),
+            Value::Error(err) => {
+                f.write_str("ERROR(")?;
+                f.write_str(std::str::from_utf8(err.as_bytes()).unwrap())?;
+                f.write_str(")")
+            }
             Value::Integer(val) => {
                 f.write_str("INTEGER(")?;
                 f.serialize_i64(*val)?;
@@ -37,7 +41,7 @@ impl<'a> Debug for Value<'a> {
             }
             Value::BulkString(data) => {
                 f.write_str("BULK STRING(")?;
-                f.write_str(std::str::from_utf8(data.as_bytes()).unwrap())?;
+                f.write_str(std::str::from_utf8(data).unwrap())?;
                 f.write_str(")")
             }
             Value::Array(array) => {
@@ -107,7 +111,7 @@ impl<'a> Value<'a> {
                 output.push(b'$');
                 output.extend_from_slice(fmt.as_bytes());
                 output.extend_from_slice(b"\r\n");
-                output.extend_from_slice(val.as_bytes());
+                output.extend_from_slice(&val);
                 output.extend_from_slice(b"\r\n");
             }
             Value::Array(array) => {
@@ -138,7 +142,7 @@ mod tests {
             null!(),
             null_array!(),
             integer!(100),
-            bulk_string!("Hello World"),
+            bulk_string!(b"Hello World"),
             simple_string!("Hello World"),
             error!("SOME ERROR")
         );

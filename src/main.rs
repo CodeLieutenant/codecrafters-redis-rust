@@ -1,9 +1,9 @@
-use std::process::exit;
+use std::sync::Arc;
 use tracing::{error, info};
 
 use tracing_subscriber::{filter::EnvFilter, fmt::layer as fmt_layer, prelude::*, registry};
 
-use redis_starter_rust::start_server;
+use redis_starter_rust::{start_server, Database};
 
 #[tokio::main]
 async fn main() {
@@ -22,14 +22,17 @@ async fn main() {
 
     registry().with(env_filter).with(stdout_layer).init();
 
-    let server = start_server(6379, 1024).await;
+    let database = Arc::new(Database::new());
+    let server = start_server(6379, 1024, Arc::clone(&database)).await;
 
     match server {
         Ok(server) => {
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
                     info!("Receiving CTRL+C... Exiting...");
-                    exit(0);
+                    drop(server);
+                    drop(database);
+                    return;
                 },
                 result = server.run() => {
                      if let Err(err) = result {
@@ -41,7 +44,6 @@ async fn main() {
 
         Err(err) => {
             error!("{:?}", err);
-            exit(1);
         }
     }
 }

@@ -4,10 +4,11 @@ mod values;
 use bytes::BytesMut;
 use tracing::{error, instrument};
 
-use crate::parser::values::{Error as ValueError, Values};
-use crate::redis_commands::{CommandKeywords, COMMAND_KEYWORDS};
+pub use values::{Error as ValueError};
+
+use values::Values;
 use crate::resp::parse as parse_input;
-use crate::{value::Value, Command};
+use crate::{Value, Command, CommandKeywords, COMMAND_KEYWORDS};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Parser<'a> {
@@ -26,11 +27,11 @@ pub enum Error {
     #[error("command does not exist")]
     NotExists,
 
-    #[error("Command argument does not exist")]
-    InvalidCommandArgument,
+    // #[error("Command argument does not exist")]
+    // InvalidCommandArgument,
 
-    #[error("Invalid arguments given to the command: {0}")]
-    InvalidArguments(&'static str),
+    // #[error("Invalid arguments given to the command: {0}")]
+    // InvalidArguments(&'static str),
 
     #[error("Failed to parse input: {0}")]
     Parse(#[from] super::resp::Error),
@@ -38,45 +39,6 @@ pub enum Error {
     #[error(transparent)]
     Value(#[from] ValueError),
 }
-
-// fn parse_get_command(values: Box<[Value]>) -> Result<Command, Error> {
-//     let values = &values[1..];
-//
-//     if values.len() == 0 {
-//         return Err(Error::InvalidArguments("get command requires 1 argument"));
-//     }
-//
-//     let key = match &values[0] {
-//         Value::SimpleString(command) | Value::BulkString(command) => Rc::clone(command),
-//         _ => {
-//             return Err(Error::InvalidArguments(
-//                 "argument to the command must be SimpleString or BulkString",
-//             ));
-//         }
-//     };
-//
-//     Ok(Command::Get(key))
-// }
-//
-// fn parse_set_command(values: Box<[Value]>) -> Result<Command, Error> {
-//     let values = &values[1..];
-//
-//     if values.len() == 0 {
-//         return Err(Error::InvalidArguments(
-//             "set command requires at least 1 argument",
-//         ));
-//     }
-//
-//     let key = get_key(&values[0])?;
-//
-//     if values.len() > 1 {
-//         let flags = SET_PARAMS
-//             .get(uncased_str(&values[1])?.as_uncased_str())
-//             .ok_or(Error::NotExists)?;
-//     }
-//
-//     Ok(Command::Set { key })
-// }
 
 impl<'a> Parser<'a> {
     pub fn parse(input: &'a BytesMut) -> Result<Self, Error> {
@@ -100,9 +62,9 @@ impl<'a> Parser<'a> {
             CommandKeywords::Echo => Ok(Command::Echo(self.ast.get_string()?)),
             CommandKeywords::Get => Ok(Command::Get(self.ast.get_string()?)),
             CommandKeywords::Set => Ok(Command::Set {
-                key: self.ast.get_string()?,
-                value: self.ast.get_string()?,
-                expiration_ms: -1,
+                key: self.ast.get_bytes()?,
+                value: self.ast.next()?,
+                expiration_ms: self.ast.get_number()?,
             }),
         }
     }
@@ -124,14 +86,5 @@ mod tests {
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Command::Ping);
-        //
-        // let parser = Parser {
-        //     ast: array![bulk_string!(b"PING")],
-        // };
-        //
-        // let result = parser.command();
-        //
-        // assert!(result.is_ok());
-        // assert_eq!(result.unwrap(), Command::Ping);
     }
 }

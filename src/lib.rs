@@ -1,20 +1,27 @@
 use std::borrow::Cow;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use crate::server::tcp::Server as InnerRedisServer;
+use server::Server as InnerRedisServer;
+pub(crate) use bytes::Buffer;
+
+pub use database::{Database, Value as DatabaseValue};
+pub use resp::Value;
 
 mod redis_commands {
     include!(concat!(env!("OUT_DIR"), "/commands.rs"));
 }
 
+pub(crate) use crate::redis_commands::{COMMAND_KEYWORDS, CommandKeywords};
+
 mod bytes;
 mod macros;
+mod database;
 
 pub(crate) mod parser;
 mod resp;
 pub(crate) mod server;
-pub mod value;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command<'a> {
@@ -23,37 +30,32 @@ pub enum Command<'a> {
     Echo(Cow<'a, str>),
     Get(Cow<'a, str>),
     Set {
-        key: Cow<'a, str>,
-        value: Cow<'a, str>,
+        key: Cow<'a, [u8]>,
+        value: &'a Value<'a>,
         expiration_ms: i64,
     },
 }
-
-// Safety -> This technically is not true
-// as Rc is not Send + Sync, but Command is handle at most in one thread,
-// even if it crosses thread boundaries, there is no concurrent access on Command
-unsafe impl<'a> Send for Command<'a> {}
-
-unsafe impl<'a> Sync for Command<'a> {}
 
 pub trait Server {
     fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + '_>>;
 }
 
-struct RedisServer(InnerRedisServer);
+struct RedisServer(InnerRedisServer, Arc<Database>);
 
 impl Server for RedisServer {
     fn run(&self) -> Pin<Box<dyn Future<Output = Result<(), std::io::Error>> + '_>> {
-        Box::pin(self.0.start())
+        Box::pin(self.0.start(Arc::clone(&self.1)))
     }
 }
 
 pub async fn start_server(
     port: u16,
     connection_limit: usize,
+    db: Arc<Database>,
 ) -> Result<Box<dyn Server>, std::io::Error> {
     let server = Box::new(RedisServer(
         InnerRedisServer::new(port, connection_limit).await?,
+        db
     ));
 
     Ok(server)
