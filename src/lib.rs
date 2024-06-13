@@ -32,7 +32,7 @@ pub enum Command<'a> {
     Set {
         key: Cow<'a, [u8]>,
         value: &'a Value<'a>,
-        expiration_ms: i64,
+        expiration: Option<tokio::time::Duration>,
     },
 }
 
