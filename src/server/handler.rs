@@ -4,6 +4,7 @@ use bytes::BytesMut;
 use std::borrow::Cow;
 use std::io::{Error as IoError, ErrorKind, Result as IoResult};
 use std::sync::Arc;
+use nom::AsBytes;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
 
 use crate::parser::{Error as ParserError, Parser};
@@ -99,6 +100,8 @@ impl<W: AsyncRead + AsyncWrite + Unpin> Handler<W> {
                                 Value::Null.serialize(&mut output);
                             }
                         }
+
+                        self.write(output.as_bytes()).await?;
                     }
                     None => self.write_error(&ClientError::KeyNotExists).await?,
                 };

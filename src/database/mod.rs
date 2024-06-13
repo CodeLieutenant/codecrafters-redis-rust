@@ -60,7 +60,7 @@ impl Database {
         let key = key.into().clone().into();
         let mut lock = self.map.write().await;
 
-        let _ = lock.insert(
+        lock.insert(
             key,
             match duration {
                 Some(duration) => Entry::Expire {
